@@ -36,6 +36,7 @@
         android:layout_height="47dp"
         android:layout_marginBottom="44dp"
         android:hint="Tell me the reason you changed the mask"
+        android:maxLines="1"
         app:layout_constraintBottom_toTopOf="@+id/btn_track_loc"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintHorizontal_bias="0.489"

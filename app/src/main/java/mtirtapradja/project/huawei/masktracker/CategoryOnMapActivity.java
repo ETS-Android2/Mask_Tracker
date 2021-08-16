@@ -3,6 +3,7 @@ package mtirtapradja.project.huawei.masktracker;
 import android.Manifest;
 import android.content.IntentSender;
 import android.content.pm.PackageManager;
+import android.location.Location;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -17,9 +18,11 @@ import androidx.core.app.ActivityCompat;
 
 import com.huawei.hmf.tasks.OnFailureListener;
 import com.huawei.hmf.tasks.OnSuccessListener;
+import com.huawei.hmf.tasks.Task;
 import com.huawei.hms.common.ApiException;
 import com.huawei.hms.common.ResolvableApiException;
 import com.huawei.hms.location.FusedLocationProviderClient;
+import com.huawei.hms.location.LocationAvailability;
 import com.huawei.hms.location.LocationCallback;
 import com.huawei.hms.location.LocationRequest;
 import com.huawei.hms.location.LocationResult;
@@ -66,6 +69,7 @@ public class CategoryOnMapActivity extends AppCompatActivity implements OnMapRea
     private LocationRequest mLocationRequest;
     private LocationCallback mLocationCallback;
     private LatLng currPosition = new LatLng(1,1);
+    private SettingsClient settingsClient;
 
     private SearchService searchService;
     private List<Site> sites = new ArrayList<Site>();
@@ -102,8 +106,6 @@ public class CategoryOnMapActivity extends AppCompatActivity implements OnMapRea
                 }, 3000);
             }
         }, 3000);
-
-
     }
 
     @Override
@@ -158,30 +160,56 @@ public class CategoryOnMapActivity extends AppCompatActivity implements OnMapRea
     }
 
     private void getCurrentLocation() {
-        mLocationRequest = new LocationRequest();
-        SettingsClient settingsClient = LocationServices.getSettingsClient(this);
+        settingsClient = LocationServices.getSettingsClient(CategoryOnMapActivity.this);
         LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder();
-        mLocationRequest = new LocationRequest();
-        // Set the location update interval (in milliseconds).
-        mLocationRequest.setInterval(10000);
-        // Set the location type.
-        mLocationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
         builder.addLocationRequest(mLocationRequest);
         LocationSettingsRequest locationSettingsRequest = builder.build();
 
-        mLocationCallback = new LocationCallback() {
+        // Before requesting location update, invoke checkLocationSettings to check device settings.
+        Task<LocationSettingsResponse> locationSettingsResponseTask =
+                settingsClient.checkLocationSettings(locationSettingsRequest);
+        locationSettingsResponseTask.addOnSuccessListener(new OnSuccessListener<LocationSettingsResponse>() {
             @Override
-            public void onLocationResult(LocationResult locationResult) {
-                if (locationResult != null) {
-                    double latitude = locationResult.getLastLocation().getLatitude();
-                    double longitude = locationResult.getLastLocation().getLongitude();
-                    // Process the location callback result.
-                    currPosition = new LatLng(latitude, longitude);
-                    Log.d(TAG, "onLocationResult: " + currPosition);
-                    stopTracking();
-                }
+            public void onSuccess(LocationSettingsResponse locationSettingsResponse) {
+                Log.i(TAG, "check location settings success");
+                fusedLocationProviderClient
+                        .requestLocationUpdates(mLocationRequest, mLocationCallback, Looper.getMainLooper())
+                        .addOnSuccessListener(new OnSuccessListener<Void>() {
+                            @Override
+                            public void onSuccess(Void aVoid) {
+                                Log.i(TAG, "requestLocationUpdatesWithCallback onSuccess");
+                            }
+                        })
+                        .addOnFailureListener(new OnFailureListener() {
+                            @Override
+                            public void onFailure(Exception e) {
+                                Log.e(TAG, "requestLocationUpdatesWithCallback onFailure:" + e.getMessage());
+                            }
+                        });
             }
-        };
+        })
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(Exception e) {
+                        Log.e(TAG, "checkLocationSetting onFailure:" + e.getMessage());
+                        int statusCode = ((ApiException) e).getStatusCode();
+                        switch (statusCode) {
+                            case LocationSettingsStatusCodes.RESOLUTION_REQUIRED:
+                                try {
+                                    // When the startResolutionForResult is invoked, a dialog box is displayed, asking you
+                                    // to open the corresponding permission.
+                                    ResolvableApiException rae = (ResolvableApiException) e;
+                                    rae.startResolutionForResult(CategoryOnMapActivity.this, 0);
+                                } catch (IntentSender.SendIntentException sie) {
+                                    Log.e(TAG, "PendingIntent unable to execute request.");
+                                }
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                });
+
         // Check the device location settings.
         settingsClient.checkLocationSettings(locationSettingsRequest)
                 // Define callback for success in checking the device location settings.
@@ -195,7 +223,6 @@ public class CategoryOnMapActivity extends AppCompatActivity implements OnMapRea
                                 .addOnSuccessListener(new OnSuccessListener<Void>() {
                                     @Override
                                     public void onSuccess(Void aVoid) {
-                                        Log.d(TAG, "Getting your location");
                                     }
                                 });
                     }
@@ -219,6 +246,42 @@ public class CategoryOnMapActivity extends AppCompatActivity implements OnMapRea
                         }
                     }
                 });
+
+        mLocationRequest = new LocationRequest();
+        // Set the location update interval (in milliseconds).
+        mLocationRequest.setInterval(5000);
+        // Set the location type.
+        mLocationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+
+        if (null == mLocationCallback) {
+            // Set the location callback.
+            mLocationCallback = new LocationCallback() {
+                @Override
+                public void onLocationResult(LocationResult locationResult) {
+                    if (locationResult != null) {
+                        List<Location> locations = locationResult.getLocations();
+                        if (!locations.isEmpty()) {
+                            for (Location location : locations) {
+                                Log.d(TAG, "onLocationResult location[Longitude,Latitude,Accuracy]:" + location.getLongitude()
+                                        + "," + location.getLatitude() + "," + location.getAccuracy());
+
+                                currPosition = new LatLng(location.getLatitude(), location.getLongitude());
+
+                                stopTracking();
+                            }
+                        }
+                    }
+                }
+
+                @Override
+                public void onLocationAvailability(LocationAvailability locationAvailability) {
+                    if (locationAvailability != null) {
+                        boolean flag = locationAvailability.isLocationAvailable();
+                        Log.i(TAG, "onLocationAvailability isLocationAvailable:" + flag);
+                    }
+                }
+            };
+        }
     }
 
     private void stopTracking() {
@@ -409,4 +472,4 @@ public class CategoryOnMapActivity extends AppCompatActivity implements OnMapRea
 
         return false;
     }
-    }
+}
